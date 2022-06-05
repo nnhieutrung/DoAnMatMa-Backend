@@ -13,7 +13,6 @@ const { SHA3 } = require('sha3');
 const crypto = require('crypto');
 
 const config = require('./config.json');
-const { Console } = require('console');
 MongoClient = new MongoDB.MongoClient(encodeURI(config.mongodb) , { useUnifiedTopology: true } );
 var ObjectId = MongoDB.ObjectId; 
 const FirstKey = "yBLTAJlcAeZABQiXsrDEv5CVuqO0fZa5";
