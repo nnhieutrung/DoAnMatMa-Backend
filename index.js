@@ -196,7 +196,7 @@ async function main()
           let code = GetRandomCode()
 
           console.log(`Generate PIN for ${username} : ${code}`)
-          await MongoClient.db("main").collection("usercodes").insertOne({ username: username, code : code, ip : device.ip, type : device.type, location : device.location, requestTime : new Date(), isAuth : false})
+          await MongoClient.db("main").collection("usercodes").insertOne({ username: username, code : code, ip : device.ip, type : device.type, location : device.location, requestTime : Date.now() + 0, isAuth : false})
           res.locals.json({ code : code })
         }
         else 
