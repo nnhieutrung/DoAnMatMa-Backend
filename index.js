@@ -45,12 +45,12 @@ function ToTickCSharp(timestamp) {
 
 async function GetLocationFromIp(ip) {
   try {
-    let data = await fetch(`http://ip-api.com/json${ip}`).then(d => d.json())
+    let data = await fetch(`http://ip-api.com/json/${ip}`).then(d => d.json())
     if (data.status == 'success')
       return `${data.city}, ${data.regionName}, ${data.country}`
   }
   catch (e) {
-
+    console.error(e)
   }
 
   return "UNKNOWN"
