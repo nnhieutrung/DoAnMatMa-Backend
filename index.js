@@ -169,60 +169,72 @@ async function main()
       }        
     })
     .post("/login" , async (req, res) => {
-      let body = req.body;
-      let username = (body.username || "").trim().toLowerCase();
-      let password = (body.password || "").trim();
+      try {
+        let body = req.body;
+        let username = (body.username || "").trim().toLowerCase();
+        let password = (body.password || "").trim();
 
-      console.log("Request Login ",body);
-      if (!username)
-        return res.status(406).json({ error : "Username không hợp lệ"});
+        console.log("Request Login ",body);
+        if (!username)
+          return res.status(406).json({ error : "Username không hợp lệ"});
 
-      if (!password)
-        return res.status(406).json({ error : "Password không hợp lệ"});
-    
+        if (!password)
+          return res.status(406).json({ error : "Password không hợp lệ"});
+      
 
-      let data = await MongoClient.db("main").collection("users").find({username: username}).toArray()
-      if (data.length != 0) { 
-        console.log(data[0].hashedPassword,  HashPassword(password), data[0].hashedPassword == HashPassword(password))
-        if (data[0].hashedPassword == HashPassword(password)) {
-          let device = {
-            ip : req.ipInfo.ip,
-            type : req.device.type,
+        let data = await MongoClient.db("main").collection("users").find({username: username}).toArray()
+        if (data.length != 0) { 
+          console.log(data[0].hashedPassword,  HashPassword(password), data[0].hashedPassword == HashPassword(password))
+          if (data[0].hashedPassword == HashPassword(password)) {
+            let device = {
+              ip : req.ipInfo.ip,
+              type : req.device.type,
+            }
+
+            device.location = await GetLocationFromIp(device.ip)
+      
+            console.log("Device Info", device)
+            let code = GetRandomCode()
+
+            console.log(`Generate PIN for ${username} : ${code}`)
+            await MongoClient.db("main").collection("usercodes").insertOne({ username: username, code : code, ip : device.ip, type : device.type, location : device.location, requestTime : Date.now() + 0, isAuth : false})
+            res.locals.json({ code : code })
           }
-
-          device.location = await GetLocationFromIp(device.ip)
-    
-          console.log("Device Info", device)
-          let code = GetRandomCode()
-
-          console.log(`Generate PIN for ${username} : ${code}`)
-          await MongoClient.db("main").collection("usercodes").insertOne({ username: username, code : code, ip : device.ip, type : device.type, location : device.location, requestTime : Date.now() + 0, isAuth : false})
-          res.locals.json({ code : code })
+          else 
+            return res.status(406).json({ error : "Mật khẩu không đúng"})
         }
-        else 
-          return res.status(406).json({ error : "Mật khẩu không đúng"})
+        else  return res.status(406).json({ error : "Tên tài khoản không tồn tại"})
       }
-      else  return res.status(406).json({ error : "Tên tài khoản không tồn tại"})
+      catch (e) {
+        console.error(e)
+        return res.status(406).json({ error : "Có lỗi phát sinh trên máy chủ. Vui lòng thử lại"});
+      } 
     })    
     .post("/gettoken" , async (req, res) => {
-      let body = req.body;
-      let code = (body.code || "").trim();
-
-      console.log("Request Get Token From Code ", code);
-      if (!code)
-        return res.status(406).json({ error : "code không hợp lệ"});
-
-      let data = await MongoClient.db("main").collection("usercodes").find({code: code, ip : req.ipInfo.ip, type : req.device.type}).toArray()
-      if (data.length != 0 && data[0].isAuth) { 
-        let token = GetRandomString(75)
-        console.log("Get Token from Code", data)
-        await MongoClient.db("main").collection("usercodes").deleteMany({code: code, ip : req.ipInfo.ip, type : req.device.type}).toArray()
-        await MongoClient.db("main").collection("usertokens").insertOne( { username : data[0].username, token : token, ip : data[0].ip, canAuth : false})
-        console.log(`Create Token For User ${data[0].username} : ${token}`)
-
-        res.locals.json({token : token})
+      try {
+        let body = req.body;
+        let code = (body.code || "").trim();
+  
+        console.log("Request Get Token From Code ", code);
+        if (!code)
+          return res.status(406).json({ error : "code không hợp lệ"});
+  
+        let data = await MongoClient.db("main").collection("usercodes").find({code: code, ip : req.ipInfo.ip, type : req.device.type}).toArray()
+        if (data.length != 0 && data[0].isAuth) { 
+          let token = GetRandomString(75)
+          console.log("Get Token from Code", data)
+          await MongoClient.db("main").collection("usercodes").deleteMany({code: code, ip : req.ipInfo.ip, type : req.device.type}).toArray()
+          await MongoClient.db("main").collection("usertokens").insertOne( { username : data[0].username, token : token, ip : data[0].ip, canAuth : false})
+          console.log(`Create Token For User ${data[0].username} : ${token}`)
+  
+          res.locals.json({token : token})
+        }
+        else  return res.status(406).json({ error : "Mã xác thực không hợp lệ hoặc chưa được cấp quyền"})
       }
-      else  return res.status(406).json({ error : "Mã xác thực không hợp lệ hoặc chưa được cấp quyền"})
+      catch (e) {
+        console.error(e)
+        return res.status(406).json({ error : "Có lỗi phát sinh trên máy chủ. Vui lòng thử lại"});
+      } 
     })
     .post("/*", async (req, res, next) => {
       try {
@@ -244,45 +256,58 @@ async function main()
       }        
     })
     .post("/getinfo" , async (req, res) => {
-      if (!req.canAuth)
-        return res.status(406).json({ error : "Thiết bị không có quyền xác minh"});
+      try {
+        if (!req.canAuth)
+          return res.status(406).json({ error : "Thiết bị không có quyền xác minh"});
 
-      let body = req.body;
-      let code = (body.code || "").trim();
+        let body = req.body;
+        let code = (body.code || "").trim();
 
-      console.log("Request Get Code Info ", code);
-      if (!code)
-        return res.status(406).json({ error : "code không hợp lệ"});
+        console.log("Request Get Code Info ", code);
+        if (!code)
+          return res.status(406).json({ error : "code không hợp lệ"});
 
-      let data = await MongoClient.db("main").collection("usercodes").find({code: code, username : req.username}).toArray()
-      if (data.length != 0 && !data[0].isAuth) { 
+        let data = await MongoClient.db("main").collection("usercodes").find({code: code, username : req.username}).toArray()
+        if (data.length != 0 && !data[0].isAuth) { 
 
-        data = data[0]
-        delete data._id
-        data.requestTime = ToTickCSharp(data.requestTime)
-        console.log(`Get info Auth Code`, data)  
-        res.locals.json(data) 
-        
+          data = data[0]
+          delete data._id
+          data.requestTime = ToTickCSharp(data.requestTime)
+          console.log(`Get info Auth Code`, data)  
+          res.locals.json(data) 
+          
+        }
+        else  return res.status(406).json({ error : "Mã xác thực bạn nhập không đúng"})
       }
-      else  return res.status(406).json({ error : "Mã xác thực bạn nhập không đúng"})
+      catch (e) {
+        console.error(e)
+        return res.status(406).json({ error : "Có lỗi phát sinh trên máy chủ. Vui lòng thử lại"});
+      } 
+   
     })
     .post("/confirm" , async (req, res) => {
-      if (!req.canAuth)
-        return res.status(406).json({ error : "Thiết bị không có quyền xác minh"});
+      try {
+        if (!req.canAuth)
+          return res.status(406).json({ error : "Thiết bị không có quyền xác minh"});
 
-      let body = req.body;
-      let code = (body.code || "").trim();
+        let body = req.body;
+        let code = (body.code || "").trim();
 
-      console.log("Confirm Auth ", code);
-      if (!code)
-        return res.status(406).json({ error : "code không hợp lệ"});
+        console.log("Confirm Auth ", code);
+        if (!code)
+          return res.status(406).json({ error : "code không hợp lệ"});
 
-      let data = await MongoClient.db("main").collection("usercodes").find({code: code, username : req.username}).toArray()
-      if (data.length != 0 && !data[0].isAuth) { 
-        await MongoClient.db("main").collection("usercodes").updateOne({code: code, username : req.username}, {$set : {isAuth : true}})
-        res.locals.json({message : "Đã cấp quyền thành công"}) 
+        let data = await MongoClient.db("main").collection("usercodes").find({code: code, username : req.username}).toArray()
+        if (data.length != 0 && !data[0].isAuth) { 
+          await MongoClient.db("main").collection("usercodes").updateOne({code: code, username : req.username}, {$set : {isAuth : true}})
+          res.locals.json({message : "Đã cấp quyền thành công"}) 
+        }
+        else  return res.status(406).json({ error : "Mã xác thực bạn nhập không đúng"})
       }
-      else  return res.status(406).json({ error : "Mã xác thực bạn nhập không đúng"})
+      catch (e) {
+        console.error(e)
+        return res.status(406).json({ error : "Có lỗi phát sinh trên máy chủ. Vui lòng thử lại"});
+      } 
     })
   
   .listen(PORT, () => console.info("WebApp" , `Listening on ${ PORT }`))
