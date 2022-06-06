@@ -221,9 +221,9 @@ async function main()
   
         let data = await MongoClient.db("main").collection("usercodes").find({code: code, ip : req.ipInfo.ip, type : req.device.type}).toArray()
         if (data.length != 0 && data[0].isAuth) { 
-          let token = GetRandomString(75)
+          let token = await GetRandomString(75)
           console.log("Get Token from Code", data)
-          await MongoClient.db("main").collection("usercodes").deleteMany({code: code, ip : req.ipInfo.ip, type : req.device.type}).toArray()
+          await MongoClient.db("main").collection("usercodes").deleteMany({code: code, ip : req.ipInfo.ip, type : req.device.type})
           await MongoClient.db("main").collection("usertokens").insertOne( { username : data[0].username, token : token, ip : data[0].ip, canAuth : false})
           console.log(`Create Token For User ${data[0].username} : ${token}`)
   
