@@ -7,10 +7,9 @@ const MongoDB =  require('mongodb');
 const expressip = require('express-ip');
 const expressdevice = require('express-device');
 const bodyParser = require('body-parser');
-const geoip = require('geoip-lite');
-
 const { SHA3 } = require('sha3');
 const crypto = require('crypto');
+const fetch = require('node-fetch');
 
 const config = require('./config.json');
 MongoClient = new MongoDB.MongoClient(encodeURI(config.mongodb) , { useUnifiedTopology: true } );
@@ -42,6 +41,19 @@ function GetRandomCode() {
 
 function ToTickCSharp(timestamp) {
   return (timestamp * 10000) + 621355968000000000
+}
+
+async function GetLocationFromIp(ip) {
+  try {
+    let data = await fetch(`http://ip-api.com/json${ip}`).then(d => d.json())
+    if (data.status == 'success')
+      return `${data.city}, ${data.regionName}, ${data.country}`
+  }
+  catch (e) {
+
+  }
+
+  return "UNKNOWN"
 }
 
 
@@ -89,7 +101,6 @@ async function main()
   console.log(`Started At : ${new Date().toLocaleString('vi-VN')}`)
   await MongoClient.connect();
   console.log("Database connected");
-
 
   app
     .set('views', path.join(__dirname, 'public'))
@@ -177,14 +188,10 @@ async function main()
           let device = {
             ip : req.ipInfo.ip,
             type : req.device.type,
-            location : "UNKNOWN"
           }
 
-          
-          let location = geoip.lookup(device.ip);
-          if (location)
-            device.location = `${location.city}, ${location.region}, ${location.country}`
-
+          device.location = await GetLocationFromIp(device.ip)
+    
           console.log("Device Info", device)
           let code = GetRandomCode()
 

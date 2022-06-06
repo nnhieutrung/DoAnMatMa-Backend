@@ -19,6 +19,8 @@
     "express-device": "^0.4.2",
     "express-ip": "^1.0.4",
     "geoip-lite": "^1.4.5",
+    "ip-location": "^1.0.1",
+    "ipapi.co": "^0.3.0",
     "mongodb": "^4.6.0",
     "path": "^0.12.7",
     "sha3": "^2.1.4"
