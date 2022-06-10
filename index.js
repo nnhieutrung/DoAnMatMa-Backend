@@ -160,7 +160,7 @@ async function main()
       try {
         let findKey = await MongoClient.db("main").collection("userkeys").find({ ip : req.ipInfo.ip }).toArray()
         if (findKey.length != 0) {
-          let key = Decrypt(findKey[0].key, findKey[0].ip, "authIP") 
+          let key = Decrypt(findKey[0].key, HashKey(findKey[0].ip, "authIP")) 
           console.log(`Found key for ${req.ipInfo.ip} : ${key}`)
           let decrypted = Decrypt(req.body.data, key)
           if (!decrypted)
@@ -292,7 +292,7 @@ async function main()
       let data = await MongoClient.db("main").collection("usercodes").find({username : req.username}).toArray()
 
       for (let i = 0; i < data.length; i++) 
-        if (!data[i].isAuth && code == Decrypt(data[i].code, data[i].ip, data[i].username)) { 
+        if (!data[i].isAuth && code == Decrypt(data[i].code, HashKey(data[i].ip, data[i].username))) { 
 
           let data = data[i]
           delete data._id
@@ -340,6 +340,7 @@ async function main()
 
 }
 
+console.log(Encrypt("Sigf0bmofrn5uAmRH8stgxU2JzOe8WLREdnkBVIJGJzhgBBjIb6SRZsmvethlbCVdLaPZ9myJ3X", HashKey("cL6iHpOUzTf4zGahCXYsldyGEYPrLhPj", "matmahoc")))
 
 
 main();
