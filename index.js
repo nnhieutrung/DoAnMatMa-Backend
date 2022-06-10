@@ -38,7 +38,6 @@ function GetRandomCode() {
   return code;
 }
 
-
 function ToTickCSharp(timestamp) {
   return ((timestamp + 7*60*60*1000)* 10000) + 621355968000000000
 }
@@ -63,19 +62,32 @@ function HashPassword(password) {
   return hash.digest('hex');
 }
 
+function HashKey(ip, user) {
+  let hash = new SHA3(256);
+  hash.update(ip + user);
+  return hash.digest({format: 'binary'});
+}
+
 function GenerateAESKey() {
   return GetRandomString(32);
 }
 
 function Encrypt(plaintext, key) {
-  const iv = new crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  try {
+    const iv = new crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
 
-  let enc1 = cipher.update(plaintext, 'utf8');
-  let enc2 = cipher.final();
+    let enc1 = cipher.update(plaintext, 'utf8');
+    let enc2 = cipher.final();
 
-  return Buffer.concat([enc1, enc2, iv, cipher.getAuthTag()]).toString("base64");
+    return Buffer.concat([enc1, enc2, iv, cipher.getAuthTag()]).toString("base64");
+  }
+  catch (err) {
+    console.log("Encrypt Error for key " + key)
+  }
+  return null;
 }
+
 
 function Decrypt(ciphertext, key) {
   try {
@@ -134,7 +146,7 @@ async function main()
         let body = JSON.parse(Decrypt(req.body.data, FirstKey))
         let key = GenerateAESKey()
         await MongoClient.db("main").collection("userkeys").deleteMany( {  ip : req.ipInfo.ip})
-        await MongoClient.db("main").collection("userkeys").insertOne( {  ip : req.ipInfo.ip,  key : key})
+        await MongoClient.db("main").collection("userkeys").insertOne( {  ip : req.ipInfo.ip,  key : Encrypt(key, HashKey(req.ipInfo.ip, "authIP"))})
         console.log(`Create Key for ${req.ipInfo.ip} : ${key}`)
         return res.status(200).json({ data : Encrypt( JSON.stringify({key : key}),  body.key) })
       }
@@ -148,7 +160,7 @@ async function main()
       try {
         let findKey = await MongoClient.db("main").collection("userkeys").find({ ip : req.ipInfo.ip }).toArray()
         if (findKey.length != 0) {
-          let key = findKey[0].key
+          let key = Decrypt(findKey[0].key, findKey[0].ip, "authIP") 
           console.log(`Found key for ${req.ipInfo.ip} : ${key}`)
           let decrypted = Decrypt(req.body.data, key)
           if (!decrypted)
@@ -183,7 +195,6 @@ async function main()
 
       let data = await MongoClient.db("main").collection("users").find({username: username}).toArray()
       if (data.length != 0) { 
-        console.log(data[0].hashedPassword,  HashPassword(password), data[0].hashedPassword == HashPassword(password))
         if (data[0].hashedPassword == HashPassword(password)) {
           let device = {
             ip : req.ipInfo.ip,
@@ -196,7 +207,16 @@ async function main()
           let code = GetRandomCode()
 
           console.log(`Generate PIN for ${username} : ${code}`)
-          await MongoClient.db("main").collection("usercodes").insertOne({ username: username, code : code, ip : device.ip, type : device.type, location : device.location, requestTime : Date.now() + 0, isAuth : false})
+          await MongoClient.db("main").collection("usercodes").insertOne(
+            { username: username,
+              code : Encrypt(code, HashKey(req.ipInfo.ip, username) ),
+              ip : device.ip,
+              type : device.type,
+              location : device.location,
+              requestTime : Date.now() + 0,
+              isAuth : false
+            })
+
           res.locals.json({ code : code })
         }
         else 
@@ -212,30 +232,37 @@ async function main()
       if (!code)
         return res.status(406).json({ error : "code không hợp lệ"});
 
-      let data = await MongoClient.db("main").collection("usercodes").find({code: code, ip : req.ipInfo.ip, type : req.device.type}).toArray()
-      if (data.length != 0 && data[0].isAuth) { 
-        let token = GetRandomString(75)
-        console.log("Get Token from Code", data)
-        await MongoClient.db("main").collection("usercodes").deleteMany({code: code, ip : req.ipInfo.ip, type : req.device.type}).toArray()
-        await MongoClient.db("main").collection("usertokens").insertOne( { username : data[0].username, token : token, ip : data[0].ip, canAuth : false})
-        console.log(`Create Token For User ${data[0].username} : ${token}`)
+      let data = await MongoClient.db("main").collection("usercodes").find({ip : req.ipInfo.ip, type : req.device.type}).toArray()
+      for (let i = 0; i < data.length; i++) 
+        if ( data[i].isAuth && code == Decrypt(data[i].code, HashKey(data[i].ip, data[i0].username))) { 
+          let token = GetRandomString(75)
+          console.log("Get Token from Code", data)
+          await MongoClient.db("main").collection("usercodes").deleteMany({code: Encrypt(code, HashKey(data[i].ip, data[i].username)) , ip : req.ipInfo.ip, type : req.device.type}).toArray()
+          await MongoClient.db("main").collection("usertokens").insertOne( { username : data[i].username, token : Encrypt(token, HashKey(data[i].ip, data[i].username)), ip : data[i].ip, canAuth : false})
+          console.log(`Create Token For User ${data[i].username} : ${token}`)
 
-        res.locals.json({token : token})
-      }
-      else  return res.status(406).json({ error : "Mã xác thực không hợp lệ hoặc chưa được cấp quyền"})
+          return res.locals.json({token : token})
+        }
+
+
+      return res.status(406).json({ error : "Mã xác thực không hợp lệ hoặc chưa được cấp quyền"})
     })
     .post("/*", async (req, res, next) => {
       try {
-        let findUser = await MongoClient.db("main").collection("usertokens").find({ token : req.body.token }).toArray()
-        if (findUser.length != 0) {
-          let username = findUser[0].username
-          let canAuth = findUser[0].canAuth
-          console.log(`Auth Success for user ${username}`)
-          
-          req.username = username
-          req.canAuth = canAuth
-          next()
-        }
+        let ip = req.body.trust || req.ipInfo.ip
+        let findUser = await MongoClient.db("main").collection("usertokens").find({  ip : ip }).toArray()
+        for (let i = 0; i < findUser.length; i++)
+       
+          if ( req.body.token == Decrypt(findUser[i].token, HashKey(findUser[i].ip, findUser[i].username)) && ( ip != req.body.trust || findUser[i].canAuth)) {
+            let username = findUser[0].username
+            let canAuth = findUser[0].canAuth
+            console.log(`Auth Success for user ${username}`)
+            
+            req.username = username
+            req.canAuth = canAuth
+
+            next()
+          }
         else return res.status(406).json({ error : "Phiên đăng nhập không hợp lệ"})
       }
       catch (e) {
@@ -254,16 +281,18 @@ async function main()
       if (!code)
         return res.status(406).json({ error : "code không hợp lệ"});
 
-      let data = await MongoClient.db("main").collection("usercodes").find({code: code, username : req.username}).toArray()
-      if (data.length != 0 && !data[0].isAuth) { 
+      let data = await MongoClient.db("main").collection("usercodes").find({username : req.username}).toArray()
 
-        data = data[0]
-        delete data._id
-        data.requestTime = ToTickCSharp(data.requestTime)
-        console.log(`Get info Auth Code`, data)  
-        res.locals.json(data) 
-        
-      }
+      for (let i = 0; i < data.length; i++) 
+        if (!data[i].isAuth && code == Decrypt(data[i].code, data[i].ip, data[i].username)) { 
+
+          let data = data[i]
+          delete data._id
+          data.requestTime = ToTickCSharp(data.requestTime)
+          console.log(`Get info Auth Code`, data)  
+          res.locals.json(data) 
+          
+        }
       else  return res.status(406).json({ error : "Mã xác thực bạn nhập không đúng"})
     })
     .post("/confirm" , async (req, res) => {
