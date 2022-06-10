@@ -215,10 +215,10 @@ async function main()
                 type : device.type,
                 location : device.location,
                 requestTime : Date.now() + 0,
-                isAuth : false
+                token : false
               })
 
-            res.locals.json({ code : code })
+            return res.locals.json({ code : code })
         
           }
           else 
@@ -241,10 +241,10 @@ async function main()
 
       let data = await MongoClient.db("main").collection("usercodes").find({ip : req.ipInfo.ip, type : req.device.type}).toArray()
       for (let i = 0; i < data.length; i++) 
-        if ( data[i].isAuth && code == Decrypt(data[i].code, HashKey(data[i].ip, data[i0].username))) { 
-          let token = GetRandomString(75)
+        if ( data[i].token && code == Decrypt(data[i].code, HashKey(data[i].ip, data[i].username))) { 
+          let token = Decrypt(data[i].token, HashKey(data[i].ip, data[i].username))
           console.log("Get Token from Code", data)
-          await MongoClient.db("main").collection("usercodes").deleteMany({code: Encrypt(code, HashKey(data[i].ip, data[i].username)) , ip : req.ipInfo.ip, type : req.device.type}).toArray()
+          await MongoClient.db("main").collection("usercodes").deleteMany({code: Encrypt(code, HashKey(data[i].ip, data[i].username)) , ip : req.ipInfo.ip, type : req.device.type})
           await MongoClient.db("main").collection("usertokens").insertOne( { username : data[i].username, token : Encrypt(token, HashKey(data[i].ip, data[i].username)), ip : data[i].ip, canAuth : false})
           console.log(`Create Token For User ${data[i].username} : ${token}`)
 
@@ -289,19 +289,17 @@ async function main()
         if (!code)
           return res.status(406).json({ error : "code không hợp lệ"});
 
-      let data = await MongoClient.db("main").collection("usercodes").find({username : req.username}).toArray()
+        let data = await MongoClient.db("main").collection("usercodes").find({username : req.username}).toArray()
 
-      for (let i = 0; i < data.length; i++) 
-        if (!data[i].isAuth && code == Decrypt(data[i].code, HashKey(data[i].ip, data[i].username))) { 
+        for (let i = 0; i < data.length; i++) 
+          if (!data[i].token && code == Decrypt(data[i].code, HashKey(data[i].ip, data[i].username))) { 
+            delete data[i]._id
+            data[i].requestTime = ToTickCSharp(data[i].requestTime)
+            console.log(`Get info Auth Code`, data[i])  
+            return res.locals.json(data[i]) 
+          }
 
-          let data = data[i]
-          delete data._id
-          data.requestTime = ToTickCSharp(data.requestTime)
-          console.log(`Get info Auth Code`, data)  
-          res.locals.json(data) 
-          
-        }
-        else  return res.status(406).json({ error : "Mã xác thực bạn nhập không đúng"})
+        return res.status(406).json({ error : "Mã xác thực bạn nhập không đúng"})
       }
       catch (e) {
         console.error(e)
@@ -321,12 +319,17 @@ async function main()
         if (!code)
           return res.status(406).json({ error : "code không hợp lệ"});
 
-        let data = await MongoClient.db("main").collection("usercodes").find({code: code, username : req.username}).toArray()
-        if (data.length != 0 && !data[0].isAuth) { 
-          await MongoClient.db("main").collection("usercodes").updateOne({code: code, username : req.username}, {$set : {isAuth : true}})
-          res.locals.json({message : "Đã cấp quyền thành công"}) 
-        }
-        else  return res.status(406).json({ error : "Mã xác thực bạn nhập không đúng"})
+        let data = await MongoClient.db("main").collection("usercodes").find({username : req.username}).toArray()
+
+        for (let i = 0; i < data.length; i++)
+          if (!data[i].token && code == Decrypt(data[i].code, HashKey(data[i].ip, data[i].username))) { 
+            let token = GetRandomString(75)
+            console.log("Get Token from Code", data)
+            await MongoClient.db("main").collection("usercodes").updateOne({code: data[i].code, username : req.username}, {$set : {token : Encrypt(token, HashKey(data[i].ip, data[i].username))}})
+            return res.locals.json({message : "Đã cấp quyền thành công"}) 
+          }
+
+         return res.status(406).json({ error : "Mã xác thực bạn nhập không đúng"})
       }
       catch (e) {
         console.error(e)
