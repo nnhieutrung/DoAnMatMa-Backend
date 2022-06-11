@@ -68,9 +68,7 @@ function HashKey(ip, user) {
   return hash.digest({format: 'binary'});
 }
 
-function GenerateAESKey() {
-  return GetRandomString(32);
-}
+
 
 function Encrypt(plaintext, key) {
   try {
@@ -144,11 +142,14 @@ async function main()
     .post("/firstPOST", async (req, res) => {
       try {
         let body = JSON.parse(Decrypt(req.body.data, FirstKey))
-        let key = GenerateAESKey()
-        await MongoClient.db("main").collection("userkeys").deleteMany( {  ip : req.ipInfo.ip})
-        await MongoClient.db("main").collection("userkeys").insertOne( {  ip : req.ipInfo.ip,  key : Encrypt(key, HashKey(req.ipInfo.ip, "authIP"))})
-        console.log(`Create Key for ${req.ipInfo.ip} : ${key}`)
-        return res.status(200).json({ data : Encrypt( JSON.stringify({key : key}),  body.key) })
+        let svKey = GetRandomString(16)
+        let key = svKey + body.clKey
+        if (key.length == 32) {
+          await MongoClient.db("main").collection("userkeys").deleteMany( {  ip : req.ipInfo.ip})
+          await MongoClient.db("main").collection("userkeys").insertOne( {  ip : req.ipInfo.ip,  key : Encrypt(key, HashKey(req.ipInfo.ip, "authIP"))})
+          console.log(`Create Key for ${req.ipInfo.ip} : ${key}`)
+          return res.status(200).json({ data : Encrypt( JSON.stringify({svKey : svKey}),  body.key) })
+        }
       }
       catch (e) {
         console.error(e)
