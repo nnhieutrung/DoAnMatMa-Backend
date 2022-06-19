@@ -293,9 +293,10 @@ async function main()
     .post("/*", async (req, res, next) => {
       try {
         let ip = req.body.trust || req.ipInfo.ip
-        let findUser = await MongoClient.db("main").collection("usercookies").find({  ip : ip, expire : { $lte: Date.now() }  }).toArray()
-        for (let i = 0; i < findUser.length; i++)
-       
+        let findUser = await MongoClient.db("main").collection("usercookies").find({  ip : ip, expire : { $gte: Date.now() }  }).toArray()
+
+       for (let i = 0; i < findUser.length; i++) {
+        console.log(ip != req.body.trust || findUser[i].canAuth)
           if ( req.body.cookie == AES.Decrypt(findUser[i].cookie, HashKey(findUser[i].ip, findUser[i].username)) && ( ip != req.body.trust || findUser[i].canAuth)) {
             let username = findUser[0].username
             let canAuth = findUser[0].canAuth
@@ -304,9 +305,11 @@ async function main()
             req.username = username
             req.canAuth = canAuth
 
-            next()
+            return next()
           }
-        else return res.status(406).json({ error : "Phiên đăng nhập không hợp lệ"})
+        }
+
+        return res.status(406).json({ error : "Phiên đăng nhập không hợp lệ"})
       }
       catch (e) {
         console.error(e)
