@@ -14,7 +14,6 @@ const fetch = require('node-fetch');
 const config = require('./config.json');
 MongoClient = new MongoDB.MongoClient(encodeURI(config.mongodb) , { useUnifiedTopology: true } );
 var ObjectId = MongoDB.ObjectId; 
-const FirstKey = "yBLTAJlcAeZABQiXsrDEv5CVuqO0fZa5";
 
 function GetRandomString(LENGTHTEXT)
 {
@@ -56,7 +55,7 @@ async function GetLocationFromIp(ip) {
 }
 
 
-function HashPassword(password) {
+function HashSHA3512(password) {
   let hash = new SHA3(512);
   hash.update(password);
   return hash.digest('hex');
@@ -64,46 +63,83 @@ function HashPassword(password) {
 
 function HashKey(ip, user) {
   let hash = new SHA3(256);
-  hash.update(ip + user);
+  hash.update(`${HashSHA3512(ip)}||${HashSHA3512(user)}`);
   return hash.digest({format: 'binary'});
 }
 
+const RSA = {
+  Encrypt(plaintext, publicKey) {
+    try {
+      let enc =  crypto.publicEncrypt(
+        {
+          key: publicKey,
+          padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+        },
+        Buffer.from(plaintext)
+      );
 
+      return enc.toString("base64")
+    }
+    catch (err) {
+      console.log("RSA: Encrypt Error for key " + publicKey)
+    }
+    return null;
 
-function Encrypt(plaintext, key) {
-  try {
-    const iv = new crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-
-    let enc1 = cipher.update(plaintext, 'utf8');
-    let enc2 = cipher.final();
-
-    return Buffer.concat([enc1, enc2, iv, cipher.getAuthTag()]).toString("base64");
+  },
+  Decrypt(ciphertext, privateKey) {
+    try {
+      let dec = crypto.privateDecrypt(
+        {
+          key: privateKey,
+          padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+        },
+        Buffer.from(ciphertext, "base64"),
+      );
+      return dec.toString()
+    }
+    catch (err) {
+      console.log("RSA: Decrypt Error for key " + privateKey)
+    }
   }
-  catch (err) {
-    console.log("Encrypt Error for key " + key)
-  }
-  return null;
 }
 
 
-function Decrypt(ciphertext, key) {
-  try {
-    enc = Buffer.from(ciphertext, "base64");
-    const iv = enc.slice(enc.length - 28, enc.length - 16);
-    const tag = enc.slice(enc.length - 16);
-    enc = enc.slice(0, enc.length - 28);
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAuthTag(tag);
-    let str = decipher.update(enc, null, 'utf8');
-    str += decipher.final('utf8');
-    return str;
+
+const AES = {
+  Encrypt(plaintext, key) {
+    try {
+      const iv = new crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  
+      let enc1 = cipher.update(plaintext, 'utf8');
+      let enc2 = cipher.final();
+  
+      return Buffer.concat([enc1, enc2, iv, cipher.getAuthTag()]).toString("base64");
+    }
+    catch (err) {
+      console.log("AES: Encrypt Error for key " + key)
+    }
+    return null;
+  },
+  Decrypt(ciphertext, key) {
+    try {
+      enc = Buffer.from(ciphertext, "base64");
+      const iv = enc.slice(enc.length - 28, enc.length - 16);
+      const tag = enc.slice(enc.length - 16);
+      enc = enc.slice(0, enc.length - 28);
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAuthTag(tag);
+      let str = decipher.update(enc, null, 'utf8');
+      str += decipher.final('utf8');
+      return str;
+    }
+    catch (err) {
+      console.log("AES: Decrypt Error for key " + key)
+    }
+    return null;
   }
-  catch (err) {
-    console.log("Decrypt Error for key " + key)
-  }
-  return null;
 }
+
 
 async function main()
 {
@@ -111,7 +147,7 @@ async function main()
   console.log(`Started At : ${new Date().toLocaleString('vi-VN')}`)
   await MongoClient.connect();
   console.log("Database connected");
-
+  
   app
     .set('views', path.join(__dirname, 'public'))
     .set('view engine', 'ejs')
@@ -138,39 +174,38 @@ async function main()
     })
     .use(bodyParser())
     
-    // POST without token
-    .post("/firstPOST", async (req, res) => {
+    // POST without cookie
+    .post("/agreementkey", async (req, res) => {
       try {
-        let body = JSON.parse(Decrypt(req.body.data, FirstKey))
-        let svKey = GetRandomString(16)
-        let key = svKey + body.clKey
-        if (key.length == 32) {
-          await MongoClient.db("main").collection("userkeys").deleteMany( {  ip : req.ipInfo.ip})
-          await MongoClient.db("main").collection("userkeys").insertOne( {  ip : req.ipInfo.ip,  key : Encrypt(key, HashKey(req.ipInfo.ip, "authIP"))})
-          console.log(`Create Key for ${req.ipInfo.ip} : ${key}`)
-          return res.status(200).json({ data : Encrypt( JSON.stringify({svKey : svKey}),  body.key) })
-        }
+        let body = req.body
+        let key = GetRandomString(32)
+
+        await MongoClient.db("main").collection("userkeys").deleteMany( {  ip : req.ipInfo.ip})
+        await MongoClient.db("main").collection("userkeys").insertOne( {  ip : req.ipInfo.ip,  key : AES.Encrypt(key, HashKey(req.ipInfo.ip, "authIP"))})
+        console.log(`Create Key for ${req.ipInfo.ip} : ${key}`)
+        return res.status(200).json({ key : RSA.Encrypt(key, crypto.createPublicKey(body.key)) })
+ 
       }
       catch (e) {
         console.error(e)
         return res.status(406).json({ error : "Có lỗi phát sinh trên máy chủ. Vui lòng thử lại"});
       }
     })
-    //Decrypt/Encrypt Init
+    //AES.Decrypt/Encrypt Init
     .post("/*", async (req, res, next) => {
       try {
         let findKey = await MongoClient.db("main").collection("userkeys").find({ ip : req.ipInfo.ip }).toArray()
         if (findKey.length != 0) {
-          let key = Decrypt(findKey[0].key, HashKey(findKey[0].ip, "authIP")) 
+          let key = AES.Decrypt(findKey[0].key, HashKey(findKey[0].ip, "authIP")) 
           console.log(`Found key for ${req.ipInfo.ip} : ${key}`)
-          let decrypted = Decrypt(req.body.data, key)
+          let decrypted = AES.Decrypt(req.body.data, key)
           if (!decrypted)
             return res.status(403).json({})
           req.body =  JSON.parse(decrypted)
           req.body = JSON.parse(req.body)
           req.key = key
           res.locals.json = function (obj) {
-            return res.status(200).json({data : Encrypt(JSON.stringify(obj), req.key)})
+            return res.status(200).json({data : AES.Encrypt(JSON.stringify(obj), req.key)})
           }
           next()
         }
@@ -197,7 +232,7 @@ async function main()
 
         let data = await MongoClient.db("main").collection("users").find({username: username}).toArray()
         if (data.length != 0) { 
-          if (data[0].hashedPassword == HashPassword(password)) {
+          if (data[0].hashedPassword == HashSHA3512(password)) {
             let device = {
               ip : req.ipInfo.ip,
               type : req.device.type,
@@ -211,12 +246,12 @@ async function main()
             console.log(`Generate PIN for ${username} : ${code}`)
             await MongoClient.db("main").collection("usercodes").insertOne(
               { username: username,
-                code : Encrypt(code, HashKey(req.ipInfo.ip, username) ),
+                code : AES.Encrypt(code, HashKey(req.ipInfo.ip, username) ),
                 ip : device.ip,
                 type : device.type,
                 location : device.location,
                 requestTime : Date.now() + 0,
-                token : false
+                cookie : false
               })
 
             return res.locals.json({ code : code })
@@ -232,24 +267,24 @@ async function main()
         return res.status(406).json({ error : "Có lỗi phát sinh trên máy chủ. Vui lòng thử lại"});
       } 
     })    
-    .post("/gettoken" , async (req, res) => {
+    .post("/getcookie" , async (req, res) => {
       let body = req.body;
       let code = (body.code || "").trim();
 
-      console.log("Request Get Token From Code ", code);
+      console.log("Request Get Cookie From Code ", code);
       if (!code)
         return res.status(406).json({ error : "code không hợp lệ"});
 
       let data = await MongoClient.db("main").collection("usercodes").find({ip : req.ipInfo.ip, type : req.device.type}).toArray()
       for (let i = 0; i < data.length; i++) 
-        if ( data[i].token && code == Decrypt(data[i].code, HashKey(data[i].ip, data[i].username))) { 
-          let token = Decrypt(data[i].token, HashKey(data[i].ip, data[i].username))
-          console.log("Get Token from Code", data)
-          await MongoClient.db("main").collection("usercodes").deleteMany({code: Encrypt(code, HashKey(data[i].ip, data[i].username)) , ip : req.ipInfo.ip, type : req.device.type})
-          await MongoClient.db("main").collection("usertokens").insertOne( { username : data[i].username, token : Encrypt(token, HashKey(data[i].ip, data[i].username)), ip : data[i].ip, canAuth : false})
-          console.log(`Create Token For User ${data[i].username} : ${token}`)
+        if ( data[i].cookie && code == AES.Decrypt(data[i].code, HashKey(data[i].ip, data[i].username))) { 
+          let cookie = AES.Decrypt(data[i].cookie, HashKey(data[i].ip, data[i].username))
+          console.log("Get Cookie from Code", data)
+          await MongoClient.db("main").collection("usercodes").deleteMany({code: AES.Encrypt(code, HashKey(data[i].ip, data[i].username)) , ip : req.ipInfo.ip, type : req.device.type})
+          await MongoClient.db("main").collection("usercookies").insertOne( { username : data[i].username, cookie : AES.Encrypt(cookie, HashKey(data[i].ip, data[i].username)), ip : data[i].ip, canAuth : false, expire : Date.now() + 315619200000})
+          console.log(`Create Cookie For User ${data[i].username} : ${cookie}`)
 
-          return res.locals.json({token : token})
+          return res.locals.json({cookie : cookie})
         }
 
 
@@ -258,10 +293,10 @@ async function main()
     .post("/*", async (req, res, next) => {
       try {
         let ip = req.body.trust || req.ipInfo.ip
-        let findUser = await MongoClient.db("main").collection("usertokens").find({  ip : ip }).toArray()
+        let findUser = await MongoClient.db("main").collection("usercookies").find({  ip : ip, expire : { $lte: Date.now() }  }).toArray()
         for (let i = 0; i < findUser.length; i++)
        
-          if ( req.body.token == Decrypt(findUser[i].token, HashKey(findUser[i].ip, findUser[i].username)) && ( ip != req.body.trust || findUser[i].canAuth)) {
+          if ( req.body.cookie == AES.Decrypt(findUser[i].cookie, HashKey(findUser[i].ip, findUser[i].username)) && ( ip != req.body.trust || findUser[i].canAuth)) {
             let username = findUser[0].username
             let canAuth = findUser[0].canAuth
             console.log(`Auth Success for user ${username}`)
@@ -293,7 +328,7 @@ async function main()
         let data = await MongoClient.db("main").collection("usercodes").find({username : req.username}).toArray()
 
         for (let i = 0; i < data.length; i++) 
-          if (!data[i].token && code == Decrypt(data[i].code, HashKey(data[i].ip, data[i].username))) { 
+          if (!data[i].cookie && code == AES.Decrypt(data[i].code, HashKey(data[i].ip, data[i].username))) { 
             delete data[i]._id
             data[i].requestTime = ToTickCSharp(data[i].requestTime)
             console.log(`Get info Auth Code`, data[i])  
@@ -323,10 +358,10 @@ async function main()
         let data = await MongoClient.db("main").collection("usercodes").find({username : req.username}).toArray()
 
         for (let i = 0; i < data.length; i++)
-          if (!data[i].token && code == Decrypt(data[i].code, HashKey(data[i].ip, data[i].username))) { 
-            let token = GetRandomString(75)
-            console.log("Get Token from Code", data)
-            await MongoClient.db("main").collection("usercodes").updateOne({code: data[i].code, username : req.username}, {$set : {token : Encrypt(token, HashKey(data[i].ip, data[i].username))}})
+          if (!data[i].cookie && code == AES.Decrypt(data[i].code, HashKey(data[i].ip, data[i].username))) { 
+            let cookie = GetRandomString(75)
+            console.log("Get Cookie from Code", data)
+            await MongoClient.db("main").collection("usercodes").updateOne({code: data[i].code, username : req.username}, {$set : {cookie : AES.Encrypt(cookie, HashKey(data[i].ip, data[i].username))}})
             return res.locals.json({message : "Đã cấp quyền thành công"}) 
           }
 
@@ -343,8 +378,6 @@ async function main()
 
 
 }
-
-console.log(Encrypt("Sigf0bmofrn5uAmRH8stgxU2JzOe8WLREdnkBVIJGJzhgBBjIb6SRZsmvethlbCVdLaPZ9myJ3X", HashKey("cL6iHpOUzTf4zGahCXYsldyGEYPrLhPj", "matmahoc")))
 
 
 main();
