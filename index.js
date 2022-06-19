@@ -296,7 +296,6 @@ async function main()
         let findUser = await MongoClient.db("main").collection("usercookies").find({  ip : ip, expire : { $gte: Date.now() }  }).toArray()
 
        for (let i = 0; i < findUser.length; i++) {
-        console.log(ip != req.body.trust || findUser[i].canAuth)
           if ( req.body.cookie == AES.Decrypt(findUser[i].cookie, HashKey(findUser[i].ip, findUser[i].username)) && ( ip != req.body.trust || findUser[i].canAuth)) {
             let username = findUser[0].username
             let canAuth = findUser[0].canAuth
@@ -363,7 +362,7 @@ async function main()
         for (let i = 0; i < data.length; i++)
           if (!data[i].cookie && code == AES.Decrypt(data[i].code, HashKey(data[i].ip, data[i].username))) { 
             let cookie = GetRandomString(75)
-            console.log("Get Cookie from Code", data)
+            console.log("Get Cookie from Code", data[i])
             await MongoClient.db("main").collection("usercodes").updateOne({code: data[i].code, username : req.username}, {$set : {cookie : AES.Encrypt(cookie, HashKey(data[i].ip, data[i].username))}})
             return res.locals.json({message : "Đã cấp quyền thành công"}) 
           }
