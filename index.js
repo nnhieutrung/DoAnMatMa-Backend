@@ -63,7 +63,7 @@ function HashSHA3512(password) {
 
 function HashKey(ip, user) {
   let hash = new SHA3(256);
-  hash.update(`${HashSHA3512(ip)}||${HashSHA3512(user)}`);
+  hash.update(`${HashSHA3512(ip)}|WmEzAt39YeZn9gOZRz3rOu58YjE5PLvVzutol9y|${HashSHA3512(user)}`);
   return hash.digest({format: 'binary'});
 }
 
@@ -139,7 +139,6 @@ const AES = {
     return null;
   }
 }
-
 
 async function main()
 {
